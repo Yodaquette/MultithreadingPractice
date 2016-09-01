@@ -49,5 +49,6 @@ void *produce(void *resource)
 	// Exit
 	printf("Boss quitting... goodbye!\n");
 	fflush(stdout);
-	return 0;
+	//return 0;
+	pthread_exit(0);
 }

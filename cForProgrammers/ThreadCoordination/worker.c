@@ -41,5 +41,7 @@ void *consume(void *resource)
 		pthread_cond_signal(resource->condBoss);
 	}
 	
-	return 0;
+	// Exit
+	//return 0;
+	pthread_exit(0);
 }
