@@ -57,8 +57,6 @@ int main(int argc,char *argv[])
 	pthread_t thread[NUM_THREADS];
 	pthread_attr_t attr, priority;
 	
-	printf("resource: %i \n",shared_resource.addrRem);
-	
 	// Initialize and set thread detach attribute
 	pthread_attr_init(&attr);
 	pthread_attr_init(&priority);
