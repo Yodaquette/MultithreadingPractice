@@ -14,25 +14,28 @@
 //#include "boss.c"
 //#include "worker.c"
 
-#define NUM_THREADS 6
+#define NUM_THREADS 10
 #define BUFFER_SIZE 25
-#define NUM_TASKS 100
+#define NUM_TASKS 1000
 
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;			// Mutex lock for buffer
 pthread_cond_t condWorker = PTHREAD_COND_INITIALIZER;	// Worker waits condition
 pthread_cond_t condBoss = PTHREAD_COND_INITIALIZER;		// Boss waits on this condition
 
+struct sched_param priority; // TODO: Add a thread priority favoring the Boss over the Workers
+
 // Shared resource that the
 // threads will work with
 typedef struct
 {
-	int addrAdd;
-	int addrRem;
-	int totElem;
-	int tasksComplete;
-	int totWorkers;
+	int addrAdd;		// Index address to write to next
+	int addrRem;		// Index address of next element to read/remove from the buffer
+	int totElem;		// Total elements in the buffer
+	int tasksComplete;	// Tracks the number of tasks complete
+	int totWorkers;		// Keeps a count on the number of Worker threads that are active
+	int currWorkers;	// Tracks the number of Worker threads currently reading
 	
-	int numList[];
+	int numList[];		// The buffer
 } resource;
 
 resource shared_resource;
@@ -48,26 +51,29 @@ int main(int argc,char *argv[])
 	shared_resource.totElem	= 0;
 	shared_resource.tasksComplete = 0;
 	shared_resource.totWorkers = 0;
+	shared_resource.currWorkers = 0;
 	
 	int threadID = 0;
 	pthread_t thread[NUM_THREADS];
-	pthread_attr_t attr;
+	pthread_attr_t attr, priority;
 	
 	printf("resource: %i \n",shared_resource.addrRem);
 	
 	// Initialize and set thread detach attribute
 	pthread_attr_init(&attr);
+	pthread_attr_init(&priority);
+	pthread_attr_setscope(&priority,PTHREAD_SCOPE_SYSTEM); // Set priority to the Boss threads
 	pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
 	
 	// Create threads
 	for(threadID = 0; threadID < NUM_THREADS; threadID++)
 	{
-		if(threadID == 0) // Create Boss thread
+		if(threadID % 2 == 0) // Create Boss threads
 		{
 			printf("Main: creating boss thread %i\n",threadID);
 			
 			// Check that return value of pthread_create() denotes "success"
-			if(pthread_create(&thread[threadID],&attr,produce,&shared_resource) != 0)
+			if(pthread_create(&thread[threadID],&priority,produce,&shared_resource) != 0)
 			{
 				printf("\n\tFailed to create thread %i\n",threadID);
 				exit(1);
@@ -131,13 +137,13 @@ void *produce(void *resource)
 		// add element
 		shared_resource.numList[shared_resource.addrAdd] = valToAdd;
 		
-		shared_resource.addrAdd++;
 		// If value for addrAdd is out of range
 		// then reset to 0
 		if(shared_resource.addrAdd > BUFFER_SIZE)
 		{
 			shared_resource.addrAdd = 0;
 		}
+		shared_resource.addrAdd++;
 		
 		shared_resource.totElem++;
 		// Unlock
@@ -145,7 +151,7 @@ void *produce(void *resource)
 		
 		// Broadcast to workers that resource is available
 		pthread_cond_broadcast(&condWorker);
-		printf("Boss produced: %i\n",valToAdd);
+		printf("Boss produced: %i\nWorkers currently reading: %i\n",valToAdd,shared_resource.currWorkers);
 	}
 	
 	// Exit
@@ -162,6 +168,9 @@ void *consume(void *resource)
 	{
 		// Lock
 		pthread_mutex_lock(&m);
+		// Increase number of current Workers
+		shared_resource.currWorkers++;
+		
 		// Underflow
 		if(shared_resource.totElem < 0)
 		{
@@ -177,13 +186,11 @@ void *consume(void *resource)
 		// If executing this section, then buffer not empty
 		// remove element
 		printf("\tValue %i at index %i\n",shared_resource.numList[shared_resource.addrRem],shared_resource.addrRem);
+		printf("\tWorkers currently reading: %i\n",shared_resource.currWorkers);
 		
 		// Replace element with a -1 flag
 		// to notify Boss index address is OK to overwrite
 		shared_resource.numList[shared_resource.addrRem] = -1;
-		
-		// Read next element
-		shared_resource.addrRem++;
 		
 		// If the next address to remove is out of range
 		// then reset to index 0
@@ -191,6 +198,9 @@ void *consume(void *resource)
 		{
 			shared_resource.addrRem = 0;
 		}
+		
+		// Read next element
+		shared_resource.addrRem++;
 		
 		// Increase tasks complete
 		if(shared_resource.tasksComplete < NUM_TASKS)
@@ -202,6 +212,9 @@ void *consume(void *resource)
 		shared_resource.totElem--;
 		// Unlock
 		pthread_mutex_unlock(&m);
+		
+		// Decrease number of current Workers
+		shared_resource.currWorkers--;
 		
 		// Signal the Boss that we're done working
 		pthread_cond_signal(&condBoss);
